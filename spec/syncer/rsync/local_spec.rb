@@ -15,6 +15,7 @@ module Backup
           rsync.path    = "~/my_backups"
           rsync.mirror  = true
           rsync.archive = false
+          rsync.link_dest = true
           rsync.additional_rsync_options = ["--opt-a", "--opt-b"]
 
           rsync.directories do |directory|
@@ -30,7 +31,9 @@ module Backup
         expect(syncer.archive).to be(false)
         expect(syncer.directories).to eq ["/some/directory", "~/home/directory"]
         expect(syncer.excludes).to eq ["*~", "tmp/"]
+        expect(syncer.link_dest).to be(true)
         expect(syncer.additional_rsync_options).to eq ["--opt-a", "--opt-b"]
+        #eq "--link-dest=~/my_backups"
       end
 
       it "should use default values if none are given" do
@@ -41,6 +44,7 @@ module Backup
         expect(syncer.archive).to be(true)
         expect(syncer.directories).to eq []
         expect(syncer.excludes).to eq []
+        expect(syncer.link_dest).to be_nil
         expect(syncer.additional_rsync_options).to be_nil
       end
 
@@ -177,6 +181,77 @@ module Backup
 
         syncer.perform!
       end
+
+
+      specify "with link-dest no target exists" do
+        syncer = Syncer::RSync::Local.new do |rsync|
+          rsync.path    = "~/projects/backup-snapshot/backup/test/dst"
+          rsync.mirror  = true
+          rsync.link_dest = true
+
+          rsync.directories do |directory|
+            directory.add "~/projects/backup-snapshot/backup/test/src/cheatsheet"
+            directory.add "~/projects/backup-snapshot/backup/test/src/scripts"
+            directory.exclude "*~"
+            directory.exclude "tmp/"
+          end
+        end
+
+
+        FileUtils.expects(:mkdir_p).with(File.expand_path("~/projects/backup-snapshot/backup/test/dst/#{Time.now.strftime("%Y-%m-%d-%H-%M-%S")}"))
+        #SandboxFileUtils.activate!("/home/attila/projects/backup-snapshot/backup/test/")
+        #Backup::Utilities.unstub(:run)
+
+        syncer.expects(:run).with(
+            "rsync --archive --delete --exclude='*~' --exclude='tmp/' " \
+        "'#{File.expand_path("~/projects/backup-snapshot/backup/test/src/cheatsheet")}' '#{File.expand_path("~/projects/backup-snapshot/backup/test/src/scripts")}' " \
+        "'#{File.expand_path("~/projects/backup-snapshot/backup/test/dst/#{Time.now.strftime("%Y-%m-%d-%H-%M-%S")}")}'"
+        )
+        #   "--link-dest=/home/attila/my_backups/#{Time.now.strftime("%Y-%m-%d-%H-%M-%S")} " \
+
+        syncer.perform!
+      end
+
+
+
+
+
+        specify "with link-dest, three folders exist" do
+          test_root = "~/projects/backup-snapshot/backup/test"
+          syncer = Syncer::RSync::Local.new do |rsync|
+            rsync.path    = "#{test_root}/dst"
+            rsync.mirror  = true
+            rsync.link_dest = true
+            rsync.keep_snapshot = 1
+
+            rsync.directories do |directory|
+              directory.add "#{test_root}/src/cheatsheet"
+              directory.add "#{test_root}/src/scripts"
+              directory.exclude "*~"
+              directory.exclude "tmp/"
+            end
+          end
+
+          #TODO Solve that this mociking doesn't return expand path thus not working when deleting as param not found
+          folders_with_existing_backup = ["#{test_root}/dst/2017-01-01-01-00-00", "#{test_root}/dst/2017-01-01-02-00-00" , "#{test_root}/dst/2017-01-01-01-00-20"]
+          Dir.stubs(:glob).returns(folders_with_existing_backup)
+
+          FileUtils.expects(:mkdir_p).with(File.expand_path("#{test_root}/dst/#{Time.now.strftime("%Y-%m-%d-%H-%M-%S")}"))
+          FileUtils.expects(:rm_f).with(File.expand_path("#{test_root}/dst/2017-01-01-01-00-00"))
+
+          syncer.expects(:run).with(
+              "rsync --archive --delete --exclude='*~' --exclude='tmp/' "\
+        "--link-dest=#{folders_with_existing_backup[1]} "\
+        "'#{File.expand_path("#{test_root}/src/cheatsheet")}' '#{File.expand_path("#{test_root}/src/scripts")}' " \
+        "'#{File.expand_path("#{test_root}/dst/#{Time.now.strftime("%Y-%m-%d-%H-%M-%S")}")}'"
+          )
+
+          syncer.perform!
+
+
+        end
+
+
 
       describe "logging messages" do
         it "logs started/finished messages" do
